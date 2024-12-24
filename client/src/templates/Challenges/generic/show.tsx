@@ -1,5 +1,6 @@
 import { graphql } from 'gatsby';
 import React, { useEffect, useRef, useState } from 'react';
+import { useFeature } from '@growthbook/growthbook-react';
 import Helmet from 'react-helmet';
 import { useTranslation } from 'react-i18next';
 import { connect } from 'react-redux';
@@ -8,7 +9,12 @@ import { isEqual } from 'lodash';
 
 // Local Utilities
 import LearnLayout from '../../../components/layouts/learn';
-import { ChallengeNode, ChallengeMeta, Test } from '../../../redux/prop-types';
+import {
+  ChallengeNode,
+  ChallengeMeta,
+  NavigationPaths,
+  Test
+} from '../../../redux/prop-types';
 import ChallengeDescription from '../components/challenge-description';
 import Hotkeys from '../components/hotkeys';
 import ChallengeTitle from '../components/challenge-title';
@@ -24,10 +30,12 @@ import {
 } from '../redux/actions';
 import { isChallengeCompletedSelector } from '../redux/selectors';
 import { BlockTypes } from '../../../../../shared/config/blocks';
+import { getChallengePaths } from '../utils/challenge-paths';
 import Scene from '../components/scene/scene';
 import MultipleChoiceQuestions from '../components/multiple-choice-questions';
 import ChallengeExplanation from '../components/challenge-explanation';
 import HelpModal from '../components/help-modal';
+import { SceneSubject } from '../components/scene/scene-subject';
 
 // Styles
 import './show.css';
@@ -58,6 +66,7 @@ interface ShowQuizProps {
   openHelpModal: () => void;
   pageContext: {
     challengeMeta: ChallengeMeta;
+    nextCurriculumPaths: NavigationPaths;
   };
   updateChallengeMeta: (arg0: ChallengeMeta) => void;
   updateSolutionFormValues: () => void;
@@ -88,7 +97,7 @@ const ShowGeneric = ({
       }
     }
   },
-  pageContext: { challengeMeta },
+  pageContext: { challengeMeta, nextCurriculumPaths },
   initTests,
   updateChallengeMeta,
   openCompletionModal,
@@ -104,11 +113,17 @@ const ShowGeneric = ({
 
   useEffect(() => {
     initTests(tests);
+    const challengePaths = getChallengePaths({
+      showNextCurriculum,
+      currentCurriculumPaths: challengeMeta,
+      nextCurriculumPaths
+    });
     updateChallengeMeta({
       ...challengeMeta,
       title,
       challengeType,
-      helpCategory
+      helpCategory,
+      ...challengePaths
     });
     challengeMounted(challengeMeta.id);
     container.current?.focus();
@@ -122,9 +137,6 @@ const ShowGeneric = ({
   const handleVideoIsLoaded = () => {
     setVideoIsLoaded(true);
   };
-
-  // scene
-  const [isScenePlaying, setIsScenePlaying] = useState(false);
 
   // assignments
   const [assignmentsCompleted, setAssignmentsCompleted] = useState(0);
@@ -144,7 +156,12 @@ const ShowGeneric = ({
   const [submittedMcqAnswers, setSubmittedMcqAnswers] = useState(
     questions.map<number | null>(() => null)
   );
+
+  const [hasAnsweredMcqCorrectly, sethasAnsweredMcqCorrectly] = useState(true);
+
   const [showFeedback, setShowFeedback] = useState(false);
+
+  const showNextCurriculum = useFeature('fcc-10').on;
 
   const handleMcqOptionChange = (
     questionIndex: number,
@@ -157,7 +174,6 @@ const ShowGeneric = ({
     );
   };
 
-  // submit
   const handleSubmit = () => {
     const hasCompletedAssignments =
       assignments.length === 0 || allAssignmentsCompleted;
@@ -169,13 +185,21 @@ const ShowGeneric = ({
     if (hasCompletedAssignments && mcqCorrect) {
       openCompletionModal();
     }
+
+    if (mcqSolutions.length > selectedMcqOptions.length || !mcqCorrect) {
+      sethasAnsweredMcqCorrectly(false);
+    } else {
+      sethasAnsweredMcqCorrectly(true);
+    }
   };
+
+  const sceneSubject = new SceneSubject();
 
   return (
     <Hotkeys
       executeChallenge={handleSubmit}
       containerRef={container}
-      playScene={scene ? () => setIsScenePlaying(true) : undefined}
+      playScene={scene ? () => sceneSubject.notify() : undefined}
     >
       <LearnLayout>
         <Helmet
@@ -193,7 +217,10 @@ const ShowGeneric = ({
 
             {description && (
               <Col md={8} mdOffset={2} sm={10} smOffset={1} xs={12}>
-                <ChallengeDescription description={description} />
+                <ChallengeDescription
+                  description={description}
+                  superBlock={superBlock}
+                />
                 <Spacer size='m' />
               </Col>
             )}
@@ -211,17 +238,14 @@ const ShowGeneric = ({
               )}
             </Col>
 
-            {scene && (
-              <Scene
-                scene={scene}
-                isPlaying={isScenePlaying}
-                setIsPlaying={setIsScenePlaying}
-              />
-            )}
+            {scene && <Scene scene={scene} sceneSubject={sceneSubject} />}
 
             <Col md={8} mdOffset={2} sm={10} smOffset={1} xs={12}>
               {instructions && (
-                <ChallengeDescription instructions={instructions} />
+                <ChallengeDescription
+                  instructions={instructions}
+                  superBlock={superBlock}
+                />
               )}
 
               <Spacer size='m' />
@@ -247,6 +271,10 @@ const ShowGeneric = ({
               {explanation ? (
                 <ChallengeExplanation explanation={explanation} />
               ) : null}
+
+              {!hasAnsweredMcqCorrectly && (
+                <p className='text-center'>{t('learn.answered-mcq')}</p>
+              )}
 
               <Button block={true} variant='primary' onClick={handleSubmit}>
                 {blockType === BlockTypes.review
